@@ -9,3 +9,6 @@ if __name__ == '__main__':
         print(i)
     for i in sql_queries.insert_table_queries:
         print(i)
+
+
+

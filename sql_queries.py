@@ -5,9 +5,9 @@ config = configparser.ConfigParser()
 config.read('dwh.cfg')
 DWH_ROLE_ARN = config["IAM_ROLE"]["ARN"]
 
-LOG_DATA = config["S3_PMT"]["LOG_DATA"]
-SONG_DATA = config["S3_PMT"]["SONG_DATA"]
-LOG_JSONPATH = config["S3_PMT"]["LOG_JSONPATH"]
+LOG_DATA = config["S3"]["LOG_DATA"]
+SONG_DATA = config["S3"]["SONG_DATA"]
+LOG_JSONPATH = config["S3"]["LOG_JSONPATH"]
 
 # SQL FORMAT
 drop_table = "DROP TABLE IF EXISTS {table_name};"
@@ -23,20 +23,9 @@ order = "ORDER BY {order}"
 s3_copy = """
         copy {table_name} from {s3_part} 
         iam_role {iam_role} 
-        region 'us-east-2'
+        region 'us-west-2'
         format as json {opt}
         """
-# gzip delimiter ';' compupdate off region 'us-west-2'
-
-"""
-        copy staging_songs from 's3://pmt-uda-bucket-us-east-2/song_data/A' 
-        iam_role 'arn:aws:iam::016036110502:role/pmt_redshift' region 'us-east-2' format as json 'auto';
-        
-                copy staging_events from 's3://pmt-uda-bucket-us-east-2/song_data/2018-11-12-events.json' 
-        iam_role 'arn:aws:iam::016036110502:role/pmt_redshift'
-        region 'us-east-2' format as json 's3://pmt-uda-bucket-us-east-2/song_data/log_json_path.json'
-
-"""
 
 # TABLE NAME
 STAGING_EVENTS = "staging_events"
@@ -66,19 +55,19 @@ create_table_queries = [
         atbs=f"""
             artist_id           VARCHAR(100),
             artist_latitude     VARCHAR(100),
-            artist_location     VARCHAR(100),
+            artist_location     VARCHAR(500),
             artist_longitude    VARCHAR(100),
-            artist_name         VARCHAR(100),
+            artist_name         VARCHAR(300),
             duration            FLOAT,
             num_songs           INT,
             song_id             VARCHAR(100),
-            title               VARCHAR(100),
+            title               VARCHAR(300),
             year                INT
         """
     ), create_table.format(
         table_name=STAGING_EVENTS,
         atbs=f"""
-            artist              VARCHAR(100),
+            artist              VARCHAR(300),
             auth                VARCHAR(100),
             firstName           VARCHAR(100),
             gender              VARCHAR(1),
@@ -91,7 +80,7 @@ create_table_queries = [
             page                VARCHAR(100),
             registration        BIGINT,
             sessionId           INT,
-            song                VARCHAR(100),
+            song                VARCHAR(300),
             status              INT,
             ts                  BIGINT,
             userAgent           VARCHAR(1000),
@@ -114,7 +103,7 @@ create_table_queries = [
         atbs=f"""
             song_id             VARCHAR(100) NOT NULL,
             artist_id           VARCHAR(100) NOT NULL,
-            title               VARCHAR(100) NOT NULL, 
+            title               VARCHAR(300) NOT NULL, 
             year                INT          NOT NULL,
             duration            FLOAT        NOT NULL,
             {create_primary_key.format(primary_keys="song_id")} 
@@ -124,8 +113,8 @@ create_table_queries = [
         table_name=ARTISTS,
         atbs=f"""
             artist_id           VARCHAR(100) NOT NULL,
-            name                VARCHAR(100) NOT NULL,
-            location            VARCHAR(100),
+            name                VARCHAR(300) NOT NULL,
+            location            VARCHAR(500),
             latitude            VARCHAR(100),
             longitude           VARCHAR(100),
             {create_primary_key.format(primary_keys="artist_id")} 
@@ -154,13 +143,12 @@ create_table_queries = [
             start_time          BIGINT      NOT NULL,
             level               VARCHAR(20) NOT NULL,
             session_id          BIGINT,
-            location            VARCHAR(100),
+            location            VARCHAR(500),
             user_agent          VARCHAR(1000),
             {create_primary_key.format(primary_keys="songplay_id")},
             {create_foreign_key.format(foreign_key="user_id", table_references=USERS, col_references="user_id")},
             {create_foreign_key.format(foreign_key="song_id", table_references=SONGS, col_references="song_id")},
-            {create_foreign_key.format(foreign_key="artist_id", table_references=ARTISTS, col_references="artist_id")},
-            {create_foreign_key.format(foreign_key="start_time", table_references=TIME, col_references="start_time")}   
+            {create_foreign_key.format(foreign_key="artist_id", table_references=ARTISTS, col_references="artist_id")}
         """
     ),
 ]
@@ -190,7 +178,7 @@ songplay_table_insert = insert_from_select.format(
     DISTINCT
         ts              AS start_time,
         userId          AS user_id,
-        lever,
+        level,
         ss.song_id,
         ss.artist_id,
         sessionId       AS session_id,
@@ -200,7 +188,7 @@ songplay_table_insert = insert_from_select.format(
     org_tbl=f""" 
         {STAGING_EVENTS} as se
         JOIN {STAGING_SONGS} as ss on (se.song = ss.title)
-        where se.song is not null 
+        where se.song is not null and se.page = 'NextSong'
     """,
 )
 
@@ -251,15 +239,15 @@ time_table_insert = insert_from_select.format(
     atbs="start_time, hour, day, week, month, year, weekday",
     values="""
     DISTINCT
-        ts as start_time, 
-        extract(hour from  timestamp 'epoch' + ts/1000 * interval '1 second') as hour,
-        extract(day from  timestamp 'epoch' + ts/1000 * interval '1 second') as day,
-        extract(week from  timestamp 'epoch' + ts/1000 * interval '1 second') as week,
-        extract(month from  timestamp 'epoch' + ts/1000 * interval '1 second') as month,
-        extract(year from  timestamp 'epoch' + ts/1000 * interval '1 second') as year,
-        extract(weekday from  timestamp 'epoch' + ts/1000 * interval '1 second') as weekday
+        start_time, 
+        extract(hour from  timestamp 'epoch' + start_time/1000 * interval '1 second') as hour,
+        extract(day from  timestamp 'epoch' + start_time/1000 * interval '1 second') as day,
+        extract(week from  timestamp 'epoch' + start_time/1000 * interval '1 second') as week,
+        extract(month from  timestamp 'epoch' + start_time/1000 * interval '1 second') as month,
+        extract(year from  timestamp 'epoch' + start_time/1000 * interval '1 second') as year,
+        extract(weekday from  timestamp 'epoch' + start_time/1000 * interval '1 second') as weekday
     """,
-    org_tbl=STAGING_EVENTS,
+    org_tbl=SONG_PLAY,
 )
 
 copy_table_queries = [
@@ -270,6 +258,30 @@ insert_table_queries = [
     user_table_insert,
     song_table_insert,
     artist_table_insert,
-    time_table_insert,
-    songplay_table_insert
+    songplay_table_insert,
+    time_table_insert
+]
+
+# ANALYSIS QUERY
+
+most_played_song_qry = """ 
+with a as (SELECT COUNT(*) AS nums, song_id
+           FROM "songplays"
+           GROUP BY "song_id"
+           order by nums desc 
+           limit 1)
+
+SELECT a.song_id,
+       s.title,
+       a.nums,
+       at.name,
+       s.year,
+       s.duration
+FROM a
+         JOIN "songs" as s on a.song_id = s.song_id
+         join "artists" as at on s.artist_id = at.artist_id
+         limit 1
+"""
+analysis_queries = [
+    most_played_song_qry
 ]
